@@ -22,8 +22,6 @@ Old Table Schema [Click Here](https://dbdiagram.io/d/required-tables-for-ams-sch
 
 | **Feature ID** | **Feature Name** | **Description** |
 | :-- | :-- | :-- |
-| **IM-001** | Stock Level Monitoring | Track product stock levels and consumption in `asset_products`. |
-| **IM-002** | Automated Stock Alerts | Trigger notifications when stock falls below thresholds. |
 | **IM-003** | Bulk Asset Operations | Import/export via CSV/Excel with field mapping; log outcomes. |
 
 ### Maintenance Management
@@ -52,10 +50,10 @@ Old Table Schema [Click Here](https://dbdiagram.io/d/required-tables-for-ams-sch
 
 ### Core Asset Tables
 
-#### `asset_categories`
+#### `asset_categories` NO CHANGE `Main Category like Electronics, etc`
 
 ```sql
-CREATE TABLE asset_categories (
+CREATE TABLE m_asset_categories (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id      UUID NOT NULL,
     company_type    VARCHAR(255) NOT NULL,
@@ -67,86 +65,86 @@ CREATE TABLE asset_categories (
 ```
 
 
-#### `asset_products`
+#### `asset_products` NO CHANGE
 
 ```sql
-CREATE TABLE asset_products (
+
+CREATE TABLE m_asset_products (
     id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name                VARCHAR(255) NOT NULL, --name will act as sub category because of the current data
+    status              INT NOT NULL,          -- 0=inactive,1=active,2=deleted 
     company_id          UUID NOT NULL,
     company_type        VARCHAR(255) NOT NULL,
     category_id         UUID NOT NULL REFERENCES asset_categories(id),
-    name                VARCHAR(255) NOT NULL,
-    description         TEXT,
+    purchase_from varchar(255) [not null],
+    purchase_date timestamp [not null],
     brand               VARCHAR(255),
-    model_number        VARCHAR(255),
+    model               VARCHAR(255),
+    serial_no varchar(255) [not null], --Unique for all products,
+    warranty timestamp [not null],
+    createdAt timestamp [not null],
+    updatedAt timestamp [not null],
     image               TEXT,
-    purchase_price      DECIMAL(15,2),
-    purchase_date       DATE,
-    warranty_expiry     DATE,
-    product_status      VARCHAR(20) DEFAULT 'available',  -- available, assigned, retired
-    condition_status    VARCHAR(20) DEFAULT 'good',
-    status              INT NOT NULL,          -- 0=inactive,1=active,2=deleted
-    stock_quantity      INT DEFAULT 0,
-    reserved_quantity   INT DEFAULT 0,
-    stock_alert_threshold INT DEFAULT 5,
-    unit_cost           DECIMAL(15,2),
-    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by          UUID NOT NULL,
-    updated_by          UUID NOT NULL
+    
 );
 ```
 
 
-#### `locations`
+#### `locations` NEW TABLE
 
 ```sql
-CREATE TABLE locations (
+CREATE TABLE m_locations (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     company_id      UUID NOT NULL,
     company_type    VARCHAR(255) NOT NULL,
-    name            VARCHAR(255) NOT NULL,
-    location_code   VARCHAR(50) UNIQUE,
+    status          INT NOT NULL,          -- 0=inactive,1=active,2=deleted 
+    location_name   VARCHAR(255) NOT NULL,
     description     TEXT,
+    
+    --optional
     latitude        DECIMAL(10,8),
     longitude       DECIMAL(11,8),
+    
+    --location information, helpful in case of tracking location of assets like AC, 
     building        VARCHAR(100),
     floor           VARCHAR(50),
     room            VARCHAR(50),
-    status          INT NOT NULL DEFAULT 1,
+
     created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    created_by      UUID NOT NULL,
-    updated_by      UUID NOT NULL
 );
 ```
 
 
 ### Assignment \& Logs Tables
 
-#### `assets`
+#### `assets` NEW COLUMN `assigned_to_type` to check whether the asset is assigned to department or location (eg. RO, AC)
 
 ```sql
-CREATE TABLE assets (
+
+CREATE TABLE m_assets (
     id                   UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id           UUID NOT NULL,
-    company_type         VARCHAR(255) NOT NULL,
-    asset_product_id     UUID NOT NULL REFERENCES asset_products(id),
-    serial_number       VARCHAR(255) UNIQUE NOT NULL,
-    assigned_to_type     VARCHAR(20),        -- 'user','department','location'
-    assigned_to_id       UUID,
-    assigned_by          UUID,
-    assigned_date        TIMESTAMP,
-    expected_return_date TIMESTAMP,
-    location_id          UUID REFERENCES locations(id),
+    company_id varchar(255) [not null],
+    product_id varchar(255) [not null],
+    assigned_to varchar(255), --id of user, department, or location
     status               INT NOT NULL DEFAULT 1,  -- 0=inactive,1=active,2=deleted
-    created_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at           TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    assigned_date timestamp [not null],
+    assigned_by varchar(255) [not null],
+    createdAt timestamp [not null],
+    updatedAt timestamp [not null],
+    company_type varchar(255),
+    serial_no varchar(255),   -- why we are using ?
+    asset_category_id int,
+    unassigned_date timestamp,
+    
+    -- new columns
+
+    assigned_to_type     VARCHAR(20),        -- 'user','department','location'
 );
 ```
 
 
-#### `asset_history`
+#### `asset_history` NEW TABLE to keep logs of asset ownership history and maintenance history
 
 ```sql
 CREATE TABLE asset_history (
@@ -207,53 +205,48 @@ CREATE TABLE asset_history (
   "user_id": "admin-456",
   "notes": "Office relocation"
 }
+// Maintenance Requests
 ```
 
-### Maintenance Tables
-
-#### `maintenance_requests`
-
-```sql
-CREATE TABLE maintenance_requests (
-    id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    company_id          UUID NOT NULL,
-    company_type        VARCHAR(255) NOT NULL,
-    asset_id            UUID NOT NULL REFERENCES assets(id),
-    issue_description   TEXT NOT NULL,
-    priority            VARCHAR(20) DEFAULT 'medium',
-    maintenance_status  VARCHAR(20) DEFAULT 'pending',
-    requested_by        UUID NOT NULL,
-    requested_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    approved_by         UUID,
-    approved_at         TIMESTAMP,
-    rejection_reason    TEXT,
-    repair_start_date   TIMESTAMP,
-    repair_end_date     TIMESTAMP,
-    assigned_to_user_id UUID,
-    performed_by        UUID,
-    vendor_name         VARCHAR(255),
-    actual_cost         DECIMAL(12,2),
-    ticket_id           UUID,
-    created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
 
 
 ## 1. Asset Registration \& Cataloging (AM-001)
 
 ```
-User Submits Asset Creation Request
-    ↓ Validate: serial_number unique, product exists
-    ↓ CREATE use existing asset_products entry 
-    ↓ CREATE assets record {
-           company_id, company_type, asset_product_id,
-           status=1, created_by, timestamps
-       }
-    ↓ INSERT asset_history {
-           asset_id, action_type="created",
-           action_details:{...}, user_id, notes
-       }
+User requests to assign an asset (select Category, Product, assignee)
+          ↓
+Query: Get available product selection list:
+          ↓
+    [Fetch all products p where
+        (
+          (p.id NOT IN (SELECT product_id FROM m_assets))    // products not yet assets
+        OR
+          (p.id IN (SELECT product_id FROM m_assets WHERE assigned_to IS NULL)) // assets unassigned
+        )
+     ]
+          ↓
+User selects product(s)
+          ↓
+For each selected product:
+    Check: Does asset exist for this product?
+          ↓                   ↓
+   [No, create asset]      [Yes, asset exists]
+   INSERT into             Get asset record with assigned_to IS NULL
+   m_assets (product_id, etc, set assigned_to)
+          ↓                   ↓
+Update asset record: set
+    assigned_to = (user/department/location ID)
+    assigned_to_type = 'user'/'department'/'location'
+    assigned_date = now
+    status = 1   // Active
+          ↓
+Insert entry in asset_history:
+    action_type = 'assigned'
+    user_id = assigner
+    action_details = assignment details (who, when, to whom)
+          ↓
+Done. Asset assigned and tracked.
+
     ↓ Publish RabbitMQ 
     ↓ Return success response with asset details
 ```
@@ -297,6 +290,24 @@ Manager Calls Assign API
     ↓ INSERT asset_history {action_type="assigned", details, user_id}
     ↓ Publish “asset.assigned”
     ↓ Notify assignee
+    
+User requests to unassign asset (asset_id)
+          ↓
+Fetch asset record, check assigned_to IS NOT NULL
+          ↓
+Update asset record:
+    assigned_to = NULL
+    assigned_to_type = NULL
+    unassigned_date = now
+    status = 1 // Open/Available
+          ↓
+Insert entry in asset_history:
+    action_type = 'unassigned'
+    user_id = operator
+    action_details = unassignment details
+          ↓
+Asset successfully unassigned, now appears as available for next assignment.
+
 ```
 
 
@@ -333,16 +344,6 @@ Scheduled Job Runs
     ↓ Publish “stock.snapshot”
 ```
 
-
-## 8. Automated Stock Alerts (IM-002)
-
-```
-Scheduled Cron
-    ↓ SELECT asset_products WHERE stock_quantity < stock_alert_threshold
-    ↓ For each:
-        • Publish “stock.low”
-        • Notify inventory managers
-```
 
 
 ## 9. Bulk Asset Operations (IM-003)

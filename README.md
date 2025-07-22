@@ -99,12 +99,7 @@ CREATE TABLE m_locations (
     company_type    VARCHAR(255) NOT NULL,
     status          INT NOT NULL,          -- 0=inactive,1=active,2=deleted 
     location_name   VARCHAR(255) NOT NULL,
-    description     TEXT,
-    
-    --optional
-    latitude        DECIMAL(10,8),
-    longitude       DECIMAL(11,8),
-    
+
     --location information, helpful in case of tracking location of assets like AC, 
     building        VARCHAR(100),
     floor           VARCHAR(50),
@@ -156,8 +151,6 @@ CREATE TABLE asset_history (
     action_details   JSONB NOT NULL,
     user_id          UUID NOT NULL,
     notes            TEXT,
-    reference_id     UUID,
-    reference_type   VARCHAR(50),
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );

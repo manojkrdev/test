@@ -168,15 +168,15 @@ All outcomes follow a **Parent → Child** hierarchy. The child `value` is store
 | No Connection | `Not Picked` | Not Picked |
 | No Connection | `Not Reachable / Switch Off` | Not Reachable / Switch Off |
 | No Connection | `Invalid Number` | Invalid Number |
-| Call Disconnected | `Disconnected - After Opening` | After Opening |
-| Call Disconnected | `Disconnected - During Conversation` | During Conversation |
+| Call Disconnected | `After Opening` | After Opening |
+| Call Disconnected | `During Conversation` | During Conversation |
 | Call Later ⚠️ | `Call Later` | Schedule a Callback |
 | Reference | `Reference` | Gave a reference |
-| Not Interested | `Not Interested - Distance Issue` | Distance Issue |
-| Not Interested | `Not Interested - High Fee` | High Fee |
-| Not Interested | `Not Interested - Govt. College` | Govt. College |
-| Not Interested | `Not Interested - Admitted Outside` | Admitted Outside |
-| Not Interested | `Not Interested - Others` | Others |
+| Not Interested | `Distance Issue` | Distance Issue |
+| Not Interested | `High Fee` | High Fee |
+| Not Interested | `Govt. College` | Govt. College |
+| Not Interested | `Admitted Outside` | Admitted Outside |
+| Not Interested | `Others` | Others |
 
 > ⚠️ **Call Later** — reminder date & time is **mandatory** when this outcome is selected.  
 > **Not Interested** — exact child reason must be selected, not just the parent.
@@ -206,15 +206,53 @@ Filter dropdown values are fetched from the backend and are **scoped to actual u
     "states": ["Maharashtra", "Greater London"],
     "districts": ["Mumbai Suburban"],
     "cities": ["Mumbai", "London"],
-    "outcomes": ["Connected", "Call Later", "Not Interested - High Fee"]
+    "outcomes": ["Connected", "Call Later", "High Fee"]
   }
 }
 ```
 
+
+### Available Filters
+
+| Filter | Source | Where Applied |
+| :-- | :-- | :-- |
+| Country | Backend  | Backend query |
+| State | Backend  | Backend query |
+| District | Backend  | Backend query |
+| City | Backend | Backend query |
+| Call Outcome (`type`) | child value only | Backend query |
+| Start Date / End Date | User-selected | Backend query |
+| Reminder Preset | User-selected chip | Backend query |
+| Search | User-typed | Backend query |
+
+> **Current behavior:** Location values come from backend (data-scoped). The **call outcome dropdown** is built on the client from the full `REFERENCE_OPTIONS` child list.
+> **Future requirement:** Outcomes should also be backend-scoped so only outcomes present in this company's used-call history appear as filter options.
+
+### Reminder Chips
+
+| Chip | Preset Value | Backend Logic |
+| :-- | :-- | :-- |
+| Overdue | `overdue` | `reminder_date < today` |
+| Today | `today` | `reminder_date = today` |
+| Tomorrow | `tomorrow` | `reminder_date = tomorrow` |
+| Custom Range | `custom` | `reminder_date between from and to` |
+
+- Selecting any chip except `custom` → immediately refetches used calls.
+- Selecting `custom` → shows a date range picker → refetch fires once both dates are selected.
+
+```json
+// Reminder fields sent in used-call request
+{
+  "reminder_preset": "custom",
+  "reminder_date_from": "2026-03-14",
+  "reminder_date_to": "2026-03-20"
+}
+```
+
+***
+
 > **Current behavior:** Location filters (`countries`, `states`, `districts`, `cities`) are backend-driven from this API.  
 > **Call outcome filter (`type`)** is currently built from the full `REFERENCE_OPTIONS` child list on the client.  
-> **Future requirement:** Outcomes should also be backend-scoped so only outcomes present in the company's used-call history appear as filter options.
-
 ---
 
 ## 7. Reminder System
@@ -251,6 +289,72 @@ The Leads Call page manages follow-up dates client-side via `follow_up_date` on 
 | `overdue` | `follow_up_date` < today |
 | `custom` | `follow_up_date` = selected date |
 | `none` | `follow_up_date` is null |
+
+
+
+### How It Works
+
+Leads Call uses a **mix of server-side and client-side filtering**. Some filters are sent to the backend in the fetch request; others are applied locally after the full lead list is fetched.
+
+### Server-Side Filters (sent in `getAllLeadsResponse`)
+
+| Filter | Field Sent | Notes |
+| :-- | :-- | :-- |
+| Date Range | `start_date`, `end_date` | Lead `createdAt` range — defaults to last 30 days |
+| Assigned User | `user_id` | `"0"` = all users |
+| Lead Source | `parent_source`, `child_source` | From `LEAD_SOURCES` tree — hierarchical |
+
+```json
+// Request with filters
+{
+  "signature": "user_auth_token",
+  "company_id": "12345",
+  "company_type": "Primary",
+  "form_id": "form_1",
+  "start_date": "2026-02-14",
+  "end_date": "2026-03-14",
+  "user_id": "101",
+  "parent_source": "Social Media",
+  "child_source": "Facebook",
+  "limit": 100000
+}
+```
+
+
+### Client-Side Filters (applied after fetch)
+
+| Filter | Field Checked | Logic |
+| :-- | :-- | :-- |
+| Follow-up Date | `follow_up_date` | See follow-up filter table below |
+| Pipeline Stage | `pipeline_char` | Exact match against selected stage |
+| Show Only Transferred | `lead_id` | Checks against `transferLeadIds` array |
+| Search Query | `response` fields, `mobile_no` | Case-insensitive partial match |
+
+### Follow-up Filter Values
+
+| Value | Logic |
+| :-- | :-- |
+| `all` | No filter — show all leads |
+| `today` | `follow_up_date` date = today |
+| `tomorrow` | `follow_up_date` date = tomorrow |
+| `overdue` | `follow_up_date` is before today |
+| `custom` | `follow_up_date` date = selected date |
+| `none` | `follow_up_date` is null or empty |
+
+### Lead Source Tree (LEAD_SOURCES)
+
+Lead source filtering uses a two-level tree. The parent value is sent as `parent_source` and the child as `child_source` to the backend.
+
+
+| Parent | Child Options |
+| :-- | :-- |
+| Direct Calling | Outbound Call Manual, Inbound Call, Inbound via Campaign |
+| Messaging Campaigns | SMS Campaign, WhatsApp Campaign |
+| Referrals | Wholesaler/Distributor, Past Student Referral, Society Referral, Department Referral |
+| Social Media | Facebook, Instagram, WhatsApp |
+| Public Form | *(no children — form link based)* |
+
+> Selecting a parent without a child sends `parent_source` only. Selecting a child sends both `parent_source` and `child_source`.
 
 ---
 
@@ -501,24 +605,7 @@ A **separate page** — does not share the Live Call tab system or its state.
 
 ---
 
-## 14. Redux State Reference
-
-```json
-{
-  "liveCall": {
-    "activeCall": null,           // Current active call object or null
-    "isAutoCall": false,          // Auto-call mode is running
-    "autoCallStopped": false,     // User manually stopped auto-call
-    "selectedCompany": {},        // Active company context
-    "isLeadsMode": false,         // true when calling from Leads Call page
-    "callDisconnectedData": {}    // Data snapshot from last disconnected call
-  }
-}
-```
-
----
-
-## 15. End-to-End Flow Summary
+## 14. End-to-End Flow Summary
 
 ### Live Call — Used Calls
 
@@ -567,7 +654,7 @@ Complete call
 
 ---
 
-## 16. Mobile Integration Notes
+## 15. Mobile Integration Notes
 
 | Area | Guidance |
 |---|---|
